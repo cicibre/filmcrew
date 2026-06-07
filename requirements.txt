@@ -1,0 +1,19 @@
+# ROVA Film Crew — Python Dependencies
+
+# Core runtime
+pyyaml>=6.0
+jinja2>=3.1.0
+requests>=2.33.0
+
+# LLM / Scripting
+anthropic>=0.35.0
+
+# Video / Image editing (used by Editor)
+# moviepy>=1.0.3  # optional — install if doing advanced editing beyond ffmpeg
+# Pillow>=10.0.0   # optional — image manipulation
+
+# Audio (used by Sound Designer for concat / overlay if not using ffmpeg only)
+# pydub>=0.25.0   # optional — audio manipulation
+
+# Utils
+python-dotenv>=1.0.0

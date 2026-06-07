@@ -1,0 +1,21 @@
+# Secrets
+config.local.yaml
+.env
+*.key
+
+# Outputs (generated media)
+outputs/films/*
+outputs/manifests/*
+outputs/archive/*
+jobs/archive/*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# OS
+.DS_Store

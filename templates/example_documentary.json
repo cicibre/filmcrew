@@ -1,0 +1,17 @@
+{
+  "job_id": "fc-doc-rova-001",
+  "requested_by": "Ciara",
+  "type": "documentary",
+  "title": "Every Journey Starts With Today",
+  "subject": "ROVA's growth from first agent to 40+ agent firm",
+  "description": "A 3-minute documentary piece documenting ROVA's evolution, the graduation pipeline, and what 'there are no gaps left' actually means.",
+  "target_audience": "potential cofounders, investors, Virtuals community",
+  "duration_seconds": 180,
+  "tone": "earnest, visionary, grounded in specifics",
+  "deliverables": ["video", "music score", "captions"],
+  "reference_materials": [
+    "README.md fleet diagram",
+    "ROVA-CONTEXT-FOR-EXTERNAL-LLMS.md",
+    "AGENTS.md"
+  ]
+}

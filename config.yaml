@@ -1,0 +1,93 @@
+# ROVA Film Crew — Configuration
+# Add your API keys here to switch from dry-run to real production mode.
+
+general:
+  # Run mode: "dry_run" (default, no API calls) or "production" (calls real APIs)
+  mode: dry_run
+  # Where Clarity writes incoming job specs
+  jobs_inbox: jobs/inbox
+  # Where completed job specs are archived
+  jobs_archive: jobs/archive
+  # Where finished films are delivered
+  output_dir: outputs/films
+  # Where dry-run manifests and metadata are written
+  manifest_dir: outputs/manifests
+  # Where the media library/database lives
+  archive_dir: outputs/archive
+
+# ---------------------------------------------------------------------------
+# LLM / Scripting (required for dry-run and production)
+# Used by: Director, Screenwriter, Storyboard, Producer
+# ---------------------------------------------------------------------------
+llm:
+  provider: anthropic
+  api_key: ${ANTHROPIC_API_KEY}
+  model: claude-sonnet-4-20250514
+  max_tokens: 4096
+
+# ---------------------------------------------------------------------------
+# Video Generation (production only)
+# Used by: Cinematographer
+# ---------------------------------------------------------------------------
+video:
+  provider: runway  # or "kling", "luma"
+  api_key: ${RUNWAY_API_KEY}
+  # credits per-second estimates for Producer budgeting
+  cost_per_second_usd: 0.15
+
+# ---------------------------------------------------------------------------
+# Image Generation (production only)
+# Used by: Cinematographer (b-roll, frames)
+# ---------------------------------------------------------------------------
+image:
+  provider: flux  # or "midjourney", "dalle"
+  api_key: ${FLUX_API_KEY}
+  cost_per_image_usd: 0.02
+
+# ---------------------------------------------------------------------------
+# Voice / TTS (production only)
+# Used by: Sound Designer (voiceover, narration)
+# ---------------------------------------------------------------------------
+voice:
+  provider: elevenlabs  # or "cartesia", "openai"
+  api_key: ${ELEVENLABS_API_KEY}
+  default_voice_id: ${ELEVENLABS_VOICE_ID}
+  cost_per_character_usd: 0.00003
+
+# ---------------------------------------------------------------------------
+# Music / Audio (production only)
+# Used by: Sound Designer (score, background music, sfx)
+# ---------------------------------------------------------------------------
+music:
+  provider: suno  # or "udio"
+  api_key: ${SUNO_API_KEY}
+  cost_per_song_usd: 0.50
+
+# ---------------------------------------------------------------------------
+# Delivery targets
+# ---------------------------------------------------------------------------
+delivery:
+  # Primary: local directory (always works)
+  local:
+    enabled: true
+    path: outputs/films
+  # Optional: post to ROVA Flow when a film is ready
+  flow:
+    enabled: false
+    url: http://flow:5018/flow/api/ai-channel
+    user: FILM_CREW
+  # Optional: Telegram notification
+  telegram:
+    enabled: false
+    bot_token: ${TELEGRAM_BOT_TOKEN}
+    chat_id: ${TELEGRAM_CHAT_ID}
+
+# ---------------------------------------------------------------------------
+# Review gates — where the pipeline pauses for human approval
+# Set to false for fully automated mode (requires high trust)
+# ---------------------------------------------------------------------------
+gates:
+  director_plan: true      # pause after Director produces the plan
+  screenwriter_script: true # pause after script is written
+  storyboard_frames: true   # pause after storyboard
+  final_cut: true          # pause before delivery

@@ -1,0 +1,16 @@
+{
+  "job_id": "fc-spotlight-breakbot-001",
+  "requested_by": "Ciara",
+  "type": "agent_spotlight",
+  "title": "Meet Breakbot — ROVA's Adversarial Tester",
+  "subject": "Breakbot (port 5014)",
+  "description": "A 60-second showcase video introducing Breakbot, the agent that exists to break things on purpose so users never have to.",
+  "target_audience": "builders evaluating AI agent infrastructure",
+  "duration_seconds": 60,
+  "tone": "sharp, slightly irreverent, technically credible",
+  "deliverables": ["video", " captions"],
+  "reference_materials": [
+    "AGENTS.md section on Breakbot",
+    "BREAKBOT_SPEC.md"
+  ]
+}
