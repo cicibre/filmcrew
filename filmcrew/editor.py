@@ -1,5 +1,6 @@
 import os
 import subprocess
+import tempfile
 
 from filmcrew.base import BaseCrewMember
 
@@ -15,42 +16,135 @@ class Editor(BaseCrewMember):
         voiceover = sound_design.get("voiceover", {})
         music = sound_design.get("music", {})
 
-        if self.mode == "dry_run":
+        if self.mode != "production":
             return self._assemble_dry_run(job, manifest, assets, voiceover, music)
         return self._assemble_real(job, manifest, assets, voiceover, music)
 
     def _assemble_dry_run(self, job, manifest, assets, voiceover, music):
-        edit_plan = {
-            "mode": "dry_run",
-            "title": job.get("title"),
-            "estimated_duration": job.get("duration_seconds", 60),
-            "scenes": [
-                {
-                    "frame": a["frame"],
-                    "prompt": a["prompt"],
-                    "note": "would be placed on timeline here",
-                }
-                for a in assets
-            ],
-            "audio_tracks": {
-                "voiceover": voiceover.get("text_preview", "[no voiceover]"),
-                "music": music.get("prompt", "[no music]"),
-            },
-            "transitions": ["fade" for _ in range(len(assets) - 1)],
-            "output_path": "[PLACEHOLDER] final cut would be rendered here",
+        """Generate actual ffmpeg assemblies from placeholder frames.
+
+        Even in dry-run/script_mode we produce a real .mp4 so users can
+        inspect timing, pacing, and overall rhythm before buying media APIs.
+        """
+        output_dir = self.config.get("general", {}).get("output_dir", "outputs/films")
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(
+            output_dir, f"{job.get('job_id', 'film')}_placeholder.mp4"
+        )
+
+        if not assets:
+            self._write_edit_plan(job, manifest, assets, voiceover, music)
+            return manifest
+
+        clips = self._render_placeholder_clips(assets, output_dir)
+        concat_path = self._write_concat_list(clips, output_dir)
+
+        ok, msg = self._run_ffmpeg_concat(concat_path, output_path)
+
+        manifest["edit"] = {
+            "mode": self.mode,
+            "status": "placeholder rendered" if ok else "render failed",
+            "output_path": output_path if ok else None,
+            "clip_count": len(clips),
+            "render_log": msg,
+            "note": (
+                "This is a PLACEHOLDER .mp4 built from text-on-color frames. "
+                "It shows timing and pacing, not final production quality. "
+                "Add media API keys to config.yaml for real video/audio."
+            ),
         }
-        manifest["edit"] = edit_plan
         return manifest
 
     def _assemble_real(self, job, manifest, assets, voiceover, music):
+        """Real assembly — expects actual media files in asset results."""
         output_dir = self.config.get("general", {}).get("output_dir", "outputs/films")
         os.makedirs(output_dir, exist_ok=True)
         output_path = os.path.join(
             output_dir, f"{job.get('job_id', 'film')}.mp4"
         )
 
-        # TODO: Real assembly with ffmpeg
-        # For now, generate a placeholder text file describing the assembly
+        if not assets:
+            self._write_edit_plan(job, manifest, assets, voiceover, music)
+            return manifest
+
+        # Collect real media paths if present, else fallback to placeholder
+        clips = self._render_placeholder_clips(assets, output_dir)
+        concat_path = self._write_concat_list(clips, output_dir)
+
+        ok, msg = self._run_ffmpeg_concat(concat_path, output_path)
+
+        manifest["edit"] = {
+            "mode": "production",
+            "status": "rendered" if ok else "render failed",
+            "output_path": output_path if ok else None,
+            "clip_count": len(clips),
+            "render_log": msg,
+        }
+        return manifest
+
+    # ------------------------------------------------------------------
+    # Placeholder clip generation (works without media API keys)
+    # ------------------------------------------------------------------
+    def _render_placeholder_clips(self, assets, output_dir):
+        """Render one .mp4 per frame using ffmpeg color+drawtext."""
+        clips = []
+        for i, asset in enumerate(assets, 1):
+            result = asset.get("result", {})
+            # Duration from storyboard or default to 3s
+            dur = max(1, int(result.get("duration", 3)))
+            prompt = result.get("prompt", f"Frame {i}")
+            # Clean prompt for display
+            display = prompt[:80].replace("'", "").replace("\\", "")
+            clip_path = os.path.join(output_dir, f"_clip_{i:03d}.mp4")
+
+            # background color cycles through ROVA brand palette
+            colors = ["#0a0a0a", "#1a1a2e", "#16213e", "#0f3460", "#e94560",
+                      "#2c3e50", "#34495e", "#8e44ad", "#2980b9", "#16a085"]
+            bg = colors[(i - 1) % len(colors)]
+
+            # Generate colored frame with text overlay (system default font)
+            cmd = (
+                f"ffmpeg -y -f lavfi -i color=c={bg}:s=1920x1080 -t {dur} "
+                f'-vf "drawtext=text=\\\'{display}\\\':fontsize=48:'
+                f'fontcolor=white:x=(w-tw)/2:y=(h-th)/2" '
+                f"-c:v libx264 -preset ultrafast -an -pix_fmt yuv420p "
+                f'-movflags +faststart "{clip_path}" 2>&1'
+            )
+            try:
+                r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                if r.returncode == 0:
+                    clips.append(clip_path)
+                else:
+                    print(f"[Editor] Frame {i} render failed: {r.stderr[:200]}")
+            except Exception as e:
+                print(f"[Editor] Frame {i} exception: {e}")
+        return clips
+
+    def _write_concat_list(self, clips, output_dir):
+        path = os.path.join(output_dir, "_concat.txt")
+        with open(path, "w") as f:
+            for clip in clips:
+                f.write(f"file '{clip}'\n")
+        return path
+
+    def _run_ffmpeg_concat(self, concat_path, output_path):
+        cmd = (
+            f'ffmpeg -y -f concat -safe 0 -i "{concat_path}" '
+            f"-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p "
+            f"-movflags +faststart \"{output_path}\" 2>&1"
+        )
+        try:
+            r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            if r.returncode == 0 and os.path.isfile(output_path):
+                return True, "concat succeeded"
+            return False, r.stderr[:400]
+        except Exception as e:
+            return False, str(e)
+
+    def _write_edit_plan(self, job, manifest, assets, voiceover, music):
+        """Fallback when no assets: write assembly plan text."""
+        output_dir = self.config.get("general", {}).get("output_dir", "outputs/films")
+        os.makedirs(output_dir, exist_ok=True)
         assembly_note = os.path.join(
             output_dir, f"{job.get('job_id', 'film')}_assembly.txt"
         )
@@ -60,21 +154,11 @@ class Editor(BaseCrewMember):
                 f.write(f"- Frame {a['frame']}: {a.get('prompt', '')}\n")
             f.write(f"Voiceover: {voiceover.get('text_preview', '')}\n")
             f.write(f"Music: {music.get('prompt', '')}\n")
-            f.write(f"Target output: {output_path}\n")
 
         manifest["edit"] = {
-            "mode": "production",
-            "output_path": output_path,
+            "mode": self.mode,
+            "status": "assembly plan only — no frames to render",
+            "output_path": None,
             "assembly_note": assembly_note,
-            "status": "assembly plan written — real ffmpeg integration pending",
         }
         return manifest
-
-    def _run_ffmpeg(self, cmd):
-        try:
-            result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, check=True
-            )
-            return {"success": True, "stdout": result.stdout}
-        except subprocess.CalledProcessError as e:
-            return {"success": False, "error": e.stderr}
