@@ -4,9 +4,9 @@ class VideoAPI:
         self.mode = config.get("general", {}).get("mode", "dry_run")
 
     def generate(self, prompt, duration=5, **kwargs):
-        if self.mode == "dry_run":
-            return self._mock(prompt, duration, **kwargs)
-        return self._real(prompt, duration, **kwargs)
+        if self.mode == "production":
+            return self._real(prompt, duration, **kwargs)
+        return self._mock(prompt, duration, **kwargs)
 
     def _mock(self, prompt, duration, **kwargs):
         cost = self.config.get("cost_per_second_usd", 0.15) * duration

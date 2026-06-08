@@ -29,6 +29,11 @@ def main():
         help="Run without API calls — generates prompts and plans only.",
     )
     parser.add_argument(
+        "--script-mode",
+        action="store_true",
+        help="Use real LLM for Director/Screenwriter/Storyboard; mock all media generators.",
+    )
+    parser.add_argument(
         "--config",
         default="config.yaml",
         help="Path to config file (default: config.yaml)",
@@ -43,6 +48,9 @@ def main():
     if args.dry_run:
         config["general"]["mode"] = "dry_run"
         print("[main] DRY-RUN MODE — no API calls will be made.\n")
+    elif args.script_mode:
+        config["general"]["mode"] = "script_mode"
+        print("[main] SCRIPT MODE — real LLM for thinking, mocked media.\n")
     else:
         print("[main] PRODUCTION MODE\n")
 

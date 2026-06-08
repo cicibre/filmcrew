@@ -4,9 +4,9 @@ class ImageAPI:
         self.mode = config.get("general", {}).get("mode", "dry_run")
 
     def generate(self, prompt, **kwargs):
-        if self.mode == "dry_run":
-            return self._mock(prompt, **kwargs)
-        return self._real(prompt, **kwargs)
+        if self.mode == "production":
+            return self._real(prompt, **kwargs)
+        return self._mock(prompt, **kwargs)
 
     def _mock(self, prompt, **kwargs):
         cost = self.config.get("cost_per_image_usd", 0.02)

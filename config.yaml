@@ -2,7 +2,10 @@
 # Add your API keys here to switch from dry-run to real production mode.
 
 general:
-  # Run mode: "dry_run" (default, no API calls) or "production" (calls real APIs)
+  # Run mode:
+  #   "dry_run"   — no API calls, everything mocked (default, safe)
+  #   "script_mode" — real LLM for Director/Screenwriter/Storyboard, mocked media
+  #   "production"  — real everything (requires API keys)
   mode: dry_run
   # Where Clarity writes incoming job specs
   jobs_inbox: jobs/inbox

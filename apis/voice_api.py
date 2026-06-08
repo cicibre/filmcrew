@@ -4,9 +4,9 @@ class VoiceAPI:
         self.mode = config.get("general", {}).get("mode", "dry_run")
 
     def generate(self, text, voice_id="default", **kwargs):
-        if self.mode == "dry_run":
-            return self._mock(text, voice_id, **kwargs)
-        return self._real(text, voice_id, **kwargs)
+        if self.mode == "production":
+            return self._real(text, voice_id, **kwargs)
+        return self._mock(text, voice_id, **kwargs)
 
     def _mock(self, text, voice_id, **kwargs):
         char_count = len(text) if text else 0
