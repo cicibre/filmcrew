@@ -36,9 +36,16 @@ class LLMClient:
         try:
             import anthropic
         except ImportError:
-            raise RuntimeError(
-                "anthropic package not installed. Run: pip install anthropic"
+            # Graceful degradation: warn and fall back to dry-run mock
+            import warnings
+            warnings.warn(
+                "anthropic package not installed. Falling back to dry-run mock. "
+                "Install with: pip install anthropic",
+                RuntimeWarning,
+                stacklevel=2,
             )
+            return self._mock(system_prompt, user_prompt)
+
         client = anthropic.Anthropic(api_key=self.api_key)
         response = client.messages.create(
             model=self.model,
@@ -48,10 +55,17 @@ class LLMClient:
             messages=[{"role": "user", "content": user_prompt}],
         )
         text = ""
+        usage = {}
         if response.content:
             text = response.content[0].text
+        if hasattr(response, "usage"):
+            usage = {
+                "input_tokens": getattr(response.usage, "input_tokens", 0),
+                "output_tokens": getattr(response.usage, "output_tokens", 0),
+            }
         return {
             "mode": "production",
             "model": self.model,
             "content": text,
+            "usage": usage,
         }

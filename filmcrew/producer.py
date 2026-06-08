@@ -10,10 +10,20 @@ from filmcrew.storyboard import Storyboard
 from filmcrew.cinematographer import Cinematographer
 from filmcrew.sound_designer import SoundDesigner
 from filmcrew.editor import Editor
+from filmcrew.exceptions import GatePause, CrewFailure
 
 
 class Producer(BaseCrewMember):
     role = "producer"
+
+    PHASE_ORDER = [
+        ("director", "director"),
+        ("screenwriter", "screenwriter"),
+        ("storyboard", "storyboard"),
+        ("cinematographer", "cinematographer"),
+        ("sound_designer", "sound_designer"),
+        ("editor", "editor"),
+    ]
 
     def __init__(self, config):
         super().__init__(config)
@@ -28,47 +38,40 @@ class Producer(BaseCrewMember):
         self.gates = config.get("gates", {})
 
     def work(self, job, manifest=None):
+        job_id = job.get("job_id", "unknown")
+
         if manifest is None:
             manifest = {}
+        else:
+            print(f"[Producer] Resuming production: {job_id}")
 
-        job_id = job.get("job_id", "unknown")
         manifest["job_id"] = job_id
-        manifest["started_at"] = datetime.utcnow().isoformat()
+        if "started_at" not in manifest:
+            manifest["started_at"] = datetime.utcnow().isoformat()
         manifest["mode"] = self.mode
 
         print(f"[Producer] Starting production: {job_id}")
 
-        # Phase 1: Director
-        print("[Producer] Calling Director...")
-        manifest = self.crew["director"].work(job, manifest)
-        if self._gate("director_plan"):
-            self._pause_for_review("director_plan", manifest)
+        for phase_key, role_name in self.PHASE_ORDER:
+            # Resume: skip if this phase already has output
+            if phase_key in manifest and phase_key != "editor":
+                print(f"[Producer] {role_name.capitalize()} already done — skipping.")
+                continue
+            # Editor is special: re-run always to reflect latest upstream changes
 
-        # Phase 2: Screenwriter
-        print("[Producer] Calling Screenwriter...")
-        manifest = self.crew["screenwriter"].work(job, manifest)
-        if self._gate("screenwriter_script"):
-            self._pause_for_review("screenwriter_script", manifest)
+            print(f"[Producer] Calling {role_name.capitalize()}...")
+            try:
+                manifest = self.crew[phase_key].work(job, manifest)
+            except Exception as e:
+                manifest["status"] = "failed"
+                manifest["failed_at"] = datetime.utcnow().isoformat()
+                manifest["failure"] = {"role": role_name, "error": str(e)}
+                self._deliver(job, manifest)
+                raise CrewFailure(role_name, job_id, e, manifest) from e
 
-        # Phase 3: Storyboard
-        print("[Producer] Calling Storyboard Artist...")
-        manifest = self.crew["storyboard"].work(job, manifest)
-        if self._gate("storyboard_frames"):
-            self._pause_for_review("storyboard_frames", manifest)
-
-        # Phase 4: Cinematographer
-        print("[Producer] Calling Cinematographer...")
-        manifest = self.crew["cinematographer"].work(job, manifest)
-
-        # Phase 5: Sound Designer
-        print("[Producer] Calling Sound Designer...")
-        manifest = self.crew["sound_designer"].work(job, manifest)
-
-        # Phase 6: Editor
-        print("[Producer] Calling Editor...")
-        manifest = self.crew["editor"].work(job, manifest)
-        if self._gate("final_cut"):
-            self._pause_for_review("final_cut", manifest)
+            gate_name = self._gate_name_for_phase(phase_key)
+            if gate_name and self._gate(gate_name):
+                self._pause_for_review(gate_name, job_id, manifest)
 
         manifest["finished_at"] = datetime.utcnow().isoformat()
         manifest["status"] = "complete"
@@ -80,13 +83,22 @@ class Producer(BaseCrewMember):
         print(f"[Producer] Production complete: {job_id}")
         return manifest
 
+    def _gate_name_for_phase(self, phase_key):
+        mapping = {
+            "director": "director_plan",
+            "screenwriter": "screenwriter_script",
+            "storyboard": "storyboard_frames",
+            "editor": "final_cut",
+        }
+        return mapping.get(phase_key)
+
     def _gate(self, gate_name):
         return self.gates.get(gate_name, True)
 
-    def _pause_for_review(self, gate_name, manifest):
+    def _pause_for_review(self, gate_name, job_id, manifest):
         print(f"[Producer] GATE: {gate_name} — review required.")
-        print("[Producer] To continue, re-run without the gate or approve in config.")
-        # In a real app, this would block/wait. For now we log and continue.
+        print("[Producer] To continue, re-run with --continue after reviewing.")
+        raise GatePause(gate_name, job_id, manifest)
 
     def _deliver(self, job, manifest):
         manifest_dir = self.config.get("general", {}).get(
