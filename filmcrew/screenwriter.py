@@ -42,6 +42,7 @@ class Screenwriter(BaseCrewMember):
             "narration_pov": pov,
             "word_count_approx": len(words),
             "estimated_duration_seconds": self._estimate_duration(content),
+            "tokens": result.get("usage", {}),
         }
         return manifest
 

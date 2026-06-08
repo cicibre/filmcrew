@@ -14,6 +14,7 @@ class Archivist(BaseCrewMember):
         )
         os.makedirs(archive_dir, exist_ok=True)
 
+        tokens = self._extract_tokens(manifest)
         entry = {
             "job_id": job.get("job_id"),
             "title": job.get("title"),
@@ -24,6 +25,7 @@ class Archivist(BaseCrewMember):
             "finished_at": manifest.get("finished_at"),
             "mode": manifest.get("mode"),
             "cost_estimate_usd": self._extract_cost(manifest),
+            "tokens": tokens,
             "status": manifest.get("status"),
             "manifest_path": self._manifest_path(job),
         }
@@ -63,6 +65,20 @@ class Archivist(BaseCrewMember):
             if isinstance(section, dict):
                 total += section.get("total_cost_estimate_usd", 0)
         return round(total, 4)
+
+    def _extract_tokens(self, manifest):
+        tokens = {}
+        for key in ["director_plan", "screenplay", "storyboard"]:
+            section = manifest.get(key, {})
+            if isinstance(section, dict) and "tokens" in section:
+                for tkey, tval in section["tokens"].items():
+                    tokens[f"{key}.{tkey}"] = tval
+        total_in = sum(v for k, v in tokens.items() if "input" in k)
+        total_out = sum(v for k, v in tokens.items() if "output" in k)
+        tokens["TOTAL_input"] = total_in
+        tokens["TOTAL_output"] = total_out
+        tokens["TOTAL_all"] = total_in + total_out
+        return tokens
 
     def _manifest_path(self, job):
         manifest_dir = self.config.get("general", {}).get(

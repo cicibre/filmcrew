@@ -31,6 +31,7 @@ class Director(BaseCrewMember):
             "narration_pov": self._extract_pov(content),
             "music_mood": self._extract_field(content, "music mood", "ambient, understated"),
             "visual_style": self._extract_field(content, "visual style", "clean, documentary"),
+            "tokens": result.get("usage", {}),
         }
         return manifest
 

@@ -35,7 +35,7 @@ llm:
 # Used by: Cinematographer
 # ---------------------------------------------------------------------------
 video:
-  provider: runway  # or "kling", "luma"
+  provider: runway           # "runway" | "kling" | "luma"
   api_key: ${RUNWAY_API_KEY}
   # credits per-second estimates for Producer budgeting
   cost_per_second_usd: 0.15
@@ -45,8 +45,8 @@ video:
 # Used by: Cinematographer (b-roll, frames)
 # ---------------------------------------------------------------------------
 image:
-  provider: flux  # or "midjourney", "dalle"
-  api_key: ${FLUX_API_KEY}
+  provider: replicate        # "replicate" hosts FLUX; other providers coming
+  api_key: ${REPLICATE_API_KEY}  # or ${FLUX_API_KEY} | ${MIDJOURNEY_API_KEY}
   cost_per_image_usd: 0.02
 
 # ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ image:
 # Used by: Sound Designer (voiceover, narration)
 # ---------------------------------------------------------------------------
 voice:
-  provider: elevenlabs  # or "cartesia", "openai"
+  provider: elevenlabs       # "elevenlabs" | "cartesia" | "openai"
   api_key: ${ELEVENLABS_API_KEY}
   default_voice_id: ${ELEVENLABS_VOICE_ID}
   cost_per_character_usd: 0.00003
@@ -64,7 +64,7 @@ voice:
 # Used by: Sound Designer (score, background music, sfx)
 # ---------------------------------------------------------------------------
 music:
-  provider: suno  # or "udio"
+  provider: suno             # "suno" | "udio" | "mubert" | "aiva"
   api_key: ${SUNO_API_KEY}
   cost_per_song_usd: 0.50
 

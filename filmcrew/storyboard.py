@@ -32,6 +32,7 @@ class Storyboard(BaseCrewMember):
             "mode": self.mode,
             "frames": self._parse_frames(content, job),
             "style_notes": plan.get("visual_style", "clean, documentary"),
+            "tokens": result.get("usage", {}),
         }
         return manifest
 

@@ -78,6 +78,7 @@ class Producer(BaseCrewMember):
 
         # Delivery
         self._deliver(job, manifest)
+        self._notify(job, manifest)
         self._archive_job(job)
 
         print(f"[Producer] Production complete: {job_id}")
@@ -125,3 +126,54 @@ class Producer(BaseCrewMember):
                 shutil.move(src, dst)
                 print(f"[Producer] Job archived: {fname}")
                 break
+
+    def _notify(self, job, manifest):
+        status = manifest.get("status", "unknown")
+        job_id = job.get("job_id", "unknown")
+        title = job.get("title", "Untitled")
+        manifest_dir = self.config.get("general", {}).get(
+            "manifest_dir", "outputs/manifests"
+        )
+        manifest_path = os.path.join(
+            manifest_dir, f"{job_id}_manifest.json"
+        )
+
+        # Flow notification
+        flow_cfg = self.config.get("delivery", {}).get("flow", {})
+        if flow_cfg.get("enabled"):
+            try:
+                import requests
+                requests.post(
+                    flow_cfg.get("url", "http://flow:5018/flow/api/ai-channel"),
+                    json={
+                        "user": flow_cfg.get("user", "FILM_CREW"),
+                        "type": "film_complete",
+                        "message": f"Film '{title}' is {status}. Manifest: {manifest_path}",
+                    },
+                    timeout=5,
+                )
+                print(f"[Producer] Notified Flow: {status}")
+            except Exception as e:
+                print(f"[Producer] Flow notification failed: {e}")
+
+        # Telegram notification
+        tg_cfg = self.config.get("delivery", {}).get("telegram", {})
+        if tg_cfg.get("enabled"):
+            try:
+                import requests
+                bot_token = tg_cfg.get("bot_token", "")
+                chat_id = tg_cfg.get("chat_id", "")
+                text = (
+                    f"🎬 *ROVA Film Crew*\n"
+                    f"Job: {job_id}\n"
+                    f"Title: {title}\n"
+                    f"Status: {status.upper()}"
+                )
+                requests.post(
+                    f"https://api.telegram.org/bot{bot_token}/sendMessage",
+                    json={"chat_id": chat_id, "text": text, "parse_mode": "Markdown"},
+                    timeout=5,
+                )
+                print(f"[Producer] Notified Telegram: {status}")
+            except Exception as e:
+                print(f"[Producer] Telegram notification failed: {e}")
