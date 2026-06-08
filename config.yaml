@@ -25,7 +25,9 @@ general:
 llm:
   provider: anthropic
   api_key: ${ANTHROPIC_API_KEY}
-  model: claude-sonnet-4-20250514
+  # Using the canonical ROVA model alias — this is the pinned snapshot, not an
+  # evergreen pointer. Anthropic does not update weights for existing IDs.
+  model: claude-sonnet-4-6
   max_tokens: 4096
 
 # ---------------------------------------------------------------------------
