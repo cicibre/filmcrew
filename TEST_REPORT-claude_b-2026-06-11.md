@@ -50,3 +50,21 @@ Ciara said fix them. Done. Fixing resume turned out to need **four** sub-fixes (
 - Added a font probe + a **graceful fallback**: this ffmpeg has no `drawtext` (built without libfreetype) — so it renders a plain colored clip instead of failing. Real video on any ffmpeg build.
 
 **Still not verified** (need a real key / production mode): #4 media APIs, #8 token cost-tracking, #9 delivery channels, #6 handoff server. Recommend a real-key `--script-mode` smoke next.
+
+---
+
+## SCRIPT-MODE SMOKE — real Claude, verified (2026-06-11, claude_b)
+
+Ran `--script-mode` against the live Anthropic API (real key, ~$0.04 spent). This is the first time the real-LLM path has ever executed.
+
+**✅ The LLM API path WORKS.**
+- Real `messages.create` calls succeeded for Director / Screenwriter / Storyboard — no mock fallback. Auth, the `claude-sonnet-4-6` model alias, and response parsing all good.
+- Output is genuine + on-theme (Director: *"A terminal screen in a dark room, timestamp 21:14… the faint mechanical exhale…"*; music mood: *"a single cello note that arrives only at Pass 306 and grows… the way a room changes when someone enters it who was expected home."*).
+- Real storyboard produced 6 frames (vs 1 mock) → all 6 rendered to a 150s/1080p .mp4.
+- **#8 token capture works** per role (director 674/873, screenplay 648/368, storyboard 939/1034 in/out).
+
+**⚠ Minor gap:** the per-role tokens are captured but the `total_cost` rollup is `None` — the data is there, the aggregation isn't wired. Easy follow-up.
+
+**Still UNVERIFIED — needs the 4 media keys + real $:** #4 media APIs (Runway/Replicate/ElevenLabs/Suno), #9 delivery channels firing. That code has still never run.
+
+**Bottom line:** with a correct Anthropic key, the thinking half works for real. The media-generation half is written but unproven — that's the next (more expensive) test.
