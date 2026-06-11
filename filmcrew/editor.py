@@ -56,31 +56,170 @@ class Editor(BaseCrewMember):
         return manifest
 
     def _assemble_real(self, job, manifest, assets, voiceover, music):
-        """Real assembly — expects actual media files in asset results."""
+        """Real assembly: download the generated clips, normalize them to a
+        uniform spec, concat, and mux voiceover + music. Falls back to the
+        placeholder render only if no real media is usable. (Built 2026-06-11.)"""
         output_dir = self.config.get("general", {}).get("output_dir", "outputs/films")
         os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(
-            output_dir, f"{job.get('job_id', 'film')}.mp4"
-        )
+        job_id = job.get("job_id", "film")
+        output_path = os.path.join(output_dir, f"{job_id}.mp4")
 
         if not assets:
             self._write_edit_plan(job, manifest, assets, voiceover, music)
             return manifest
 
-        # Collect real media paths if present, else fallback to placeholder
-        clips = self._render_placeholder_clips(assets, output_dir)
-        concat_path = self._write_concat_list(clips, output_dir)
+        # 1) Download + normalize each generated asset into a uniform clip.
+        clips = self._collect_real_clips(assets, output_dir)
+        if not clips:
+            # Nothing real came through — be honest and render the placeholder.
+            print("[Editor] no usable real media — falling back to placeholder.")
+            return self._assemble_dry_run(job, manifest, assets, voiceover, music)
 
-        ok, msg = self._run_ffmpeg_concat(concat_path, output_path)
+        # 2) Concat the uniform (silent) clips.
+        concat_path = self._write_concat_list(clips, output_dir)
+        silent_path = os.path.join(output_dir, f"{job_id}_silent.mp4")
+        ok, msg = self._run_ffmpeg_concat(concat_path, silent_path)
+
+        final_path = None
+        audio_status = "none"
+        if ok:
+            # 3) Mux real voiceover + music if any are present.
+            audio_path = self._collect_audio(voiceover, music, output_dir)
+            if audio_path:
+                okm, mmsg = self._mux_audio(silent_path, audio_path, output_path)
+                if okm:
+                    final_path, audio_status = output_path, "muxed"
+                else:
+                    import shutil
+                    shutil.move(silent_path, output_path)
+                    final_path = output_path
+                    msg += f" | audio mux failed (video-only): {mmsg}"
+            else:
+                import shutil
+                shutil.move(silent_path, output_path)
+                final_path = output_path
+        if final_path and os.path.exists(silent_path) and silent_path != final_path:
+            try:
+                os.remove(silent_path)
+            except OSError:
+                pass
 
         manifest["edit"] = {
             "mode": "production",
             "status": "rendered" if ok else "render failed",
-            "output_path": output_path if ok else None,
+            "output_path": final_path,
             "clip_count": len(clips),
+            "real_media": True,
+            "audio": audio_status,
             "render_log": msg,
         }
         return manifest
+
+    # ------------------------------------------------------------------
+    # Real-media assembly helpers
+    # ------------------------------------------------------------------
+    def _download_to(self, src, dest):
+        """Download a URL or copy a local file to dest. Returns success bool."""
+        try:
+            if isinstance(src, str) and src.startswith("http"):
+                import requests
+                r = requests.get(src, timeout=120)
+                r.raise_for_status()
+                with open(dest, "wb") as f:
+                    f.write(r.content)
+            elif isinstance(src, str) and os.path.isfile(src):
+                import shutil
+                shutil.copyfile(src, dest)
+            else:
+                return False
+            return os.path.isfile(dest) and os.path.getsize(dest) > 0
+        except Exception as e:
+            print(f"[Editor] download failed for {str(src)[:60]}: {e}")
+            return False
+
+    def _collect_real_clips(self, assets, output_dir):
+        """Download each generated asset (video or image) and normalize it to a
+        uniform 1920x1080 silent clip. Skips mock/placeholder paths."""
+        clips = []
+        for i, asset in enumerate(assets, 1):
+            result = asset.get("result", {}) or {}
+            path = result.get("path", "")
+            mtype = (result.get("type") or "video").lower()
+            usable = isinstance(path, str) and not path.startswith("[") and (
+                path.startswith("http") or os.path.isfile(path))
+            if not usable:
+                continue
+            raw = os.path.join(output_dir, f"_raw_{i:03d}")
+            if not self._download_to(path, raw):
+                continue
+            norm = os.path.join(output_dir, f"_norm_{i:03d}.mp4")
+            dur = max(1, int(result.get("duration", 5) or 5))
+            if self._normalize_clip(raw, norm, is_image=(mtype == "image"), duration=dur):
+                clips.append(norm)
+            try:
+                os.remove(raw)
+            except OSError:
+                pass
+        return clips
+
+    def _normalize_clip(self, src, dest, is_image=False, duration=5):
+        """Re-encode any image/video into a uniform 1920x1080 30fps H.264 silent
+        clip so the concat demuxer can stitch heterogeneous sources."""
+        vf = ("scale=1920:1080:force_original_aspect_ratio=decrease,"
+              "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=30")
+        if is_image:
+            cmd = ["ffmpeg", "-y", "-loop", "1", "-i", src, "-t", str(duration)]
+        else:
+            cmd = ["ffmpeg", "-y", "-i", src]
+        cmd += ["-vf", vf, "-an", "-c:v", "libx264", "-preset", "fast",
+                "-crf", "23", "-pix_fmt", "yuv420p", "-movflags", "+faststart", dest]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            if r.returncode != 0:
+                print(f"[Editor] normalize failed: {(r.stderr or '').strip().splitlines()[-1:]}")
+            return r.returncode == 0 and os.path.isfile(dest)
+        except Exception as e:
+            print(f"[Editor] normalize exception: {e}")
+            return False
+
+    def _collect_audio(self, voiceover, music, output_dir):
+        """Download voiceover + music if real; mix them. Returns a path or None."""
+        tracks = []
+        for name, obj in (("voice", voiceover), ("music", music)):
+            if not isinstance(obj, dict):
+                continue
+            p = obj.get("path", "")
+            usable = isinstance(p, str) and not p.startswith("[") and (
+                p.startswith("http") or os.path.isfile(p))
+            if usable:
+                dest = os.path.join(output_dir, f"_audio_{name}")
+                if self._download_to(p, dest):
+                    tracks.append(dest)
+        if not tracks:
+            return None
+        if len(tracks) == 1:
+            return tracks[0]
+        mixed = os.path.join(output_dir, "_audio_mix.m4a")
+        cmd = ["ffmpeg", "-y"]
+        for t in tracks:
+            cmd += ["-i", t]
+        cmd += ["-filter_complex", f"amix=inputs={len(tracks)}:duration=longest",
+                "-c:a", "aac", mixed]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            return mixed if (r.returncode == 0 and os.path.isfile(mixed)) else tracks[0]
+        except Exception:
+            return tracks[0]
+
+    def _mux_audio(self, video_path, audio_path, dest):
+        cmd = ["ffmpeg", "-y", "-i", video_path, "-i", audio_path,
+               "-c:v", "copy", "-c:a", "aac", "-shortest",
+               "-movflags", "+faststart", dest]
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            return (r.returncode == 0 and os.path.isfile(dest), (r.stderr or "")[:200])
+        except Exception as e:
+            return (False, str(e))
 
     # ------------------------------------------------------------------
     # Placeholder clip generation (works without media API keys)

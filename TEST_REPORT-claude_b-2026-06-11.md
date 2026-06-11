@@ -89,3 +89,18 @@ Funded with $5 of Replicate credit. Tested the real media-generation path.
 **🚧 THE REAL REMAINING GAP — the editor doesn't assemble the generated media.** `editor.py::_assemble_real` (the production path) is a stub: its own comment says "collect real media paths if present, else fallback to placeholder" — but it never collects; it just calls `_render_placeholder_clips`, the SAME color-card-with-text renderer as dry-run. So **even in production you get a real .mp4, but it's placeholder color cards, NOT the real Replicate images/video.** Generation works; assembly-from-real-media is not implemented.
 
 **Bottom line:** the brain works (Anthropic), and image + video generation work (Replicate, one key). The piece that turns "generates media" into "makes a film" — downloading the assets and stitching them with the voiceover/music — is the next real build.
+
+---
+
+## REAL ASSEMBLY — the gap is closed (2026-06-11, claude_b)
+
+Rewrote `editor.py::_assemble_real` from a stub into a real assembler:
+- downloads each generated clip (URL or local; Replicate URLs expire, so download-on-assemble)
+- **normalizes** every clip to a uniform 1920×1080 / 30fps / H.264 / yuv420p silent clip (heterogeneous sources can't concat otherwise)
+- concats them in order
+- **mux** voiceover + music when present (downloads + `amix` + `-shortest`); silent if no audio keys
+- falls back to the placeholder render only if NO real media is usable (honest degradation)
+
+**Verified:** generated 2 real ltx clips, ran them through `_assemble_real` → produced `fc-assembly-test.mp4`, 1920×1080 H.264, 7.73s, `real_media: True`. The final film is the actual generated video, not placeholder cards.
+
+**State of the whole pipeline now:** brain (Anthropic) ✓ · image gen ✓ · video gen ✓ · **real assembly ✓**. Remaining: voice (ElevenLabs free tier) + music (Suno stablecoin) keys — the audio-mux code is written but untested until an audio source exists.
