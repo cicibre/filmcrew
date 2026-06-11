@@ -68,3 +68,24 @@ Ran `--script-mode` against the live Anthropic API (real key, ~$0.04 spent). Thi
 **Still UNVERIFIED — needs the 4 media keys + real $:** #4 media APIs (Runway/Replicate/ElevenLabs/Suno), #9 delivery channels firing. That code has still never run.
 
 **Bottom line:** with a correct Anthropic key, the thinking half works for real. The media-generation half is written but unproven — that's the next (more expensive) test.
+
+---
+
+## PRODUCTION MEDIA TEST — real Replicate generation (2026-06-11, claude_b)
+
+Funded with $5 of Replicate credit. Tested the real media-generation path.
+
+**✅ Image generation WORKS** — `apis/image_api.py` unchanged. Generated a real 1344×768 WebP via flux-schnell. (My suspected version-slug bug was wrong — the slug works.) Note: `replicate.delivery` URLs expire fast; must download immediately.
+
+**✅ Video generation WORKS** — after fixes to `apis/video_api.py`:
+- added a **Replicate provider** (was Runway-only) so ONE Replicate key drives image + video (no Runway needed)
+- resolve `owner/name` slug → latest **version hash** (community models need the hash, not the slug or model-endpoint)
+- default model `minimax/video-01` was **broken on Replicate's side** (its hosted backend returned `account_deactivated`); switched default to **`lightricks/ltx-video`** — reliable (172k runs), fast (~21s), cheap.
+- Result: real H.264 MP4, 768×512, 3.88s.
+- `config.yaml` video section now points at Replicate.
+
+**⚠ STILL UNTESTED:** voice (ElevenLabs — has a free tier) and music (Suno — natively takes stablecoin). Need their own keys.
+
+**🚧 THE REAL REMAINING GAP — the editor doesn't assemble the generated media.** `editor.py::_assemble_real` (the production path) is a stub: its own comment says "collect real media paths if present, else fallback to placeholder" — but it never collects; it just calls `_render_placeholder_clips`, the SAME color-card-with-text renderer as dry-run. So **even in production you get a real .mp4, but it's placeholder color cards, NOT the real Replicate images/video.** Generation works; assembly-from-real-media is not implemented.
+
+**Bottom line:** the brain works (Anthropic), and image + video generation work (Replicate, one key). The piece that turns "generates media" into "makes a film" — downloading the assets and stitching them with the voiceover/music — is the next real build.

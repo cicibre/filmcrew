@@ -35,10 +35,12 @@ llm:
 # Used by: Cinematographer
 # ---------------------------------------------------------------------------
 video:
-  provider: runway           # "runway" | "kling" | "luma"
-  api_key: ${RUNWAY_API_KEY}
-  # credits per-second estimates for Producer budgeting
-  cost_per_second_usd: 0.15
+  provider: replicate        # "replicate" (Base USDC key drives image + video) | "runway"
+  api_key: ${REPLICATE_API_KEY}
+  model: lightricks/ltx-video   # reliable + cheap + fast text-to-video on Replicate
+  # rough per-second estimate for Producer budgeting (ltx is ~pennies/clip; real
+  # cost shows in the Replicate dashboard)
+  cost_per_second_usd: 0.02
 
 # ---------------------------------------------------------------------------
 # Image Generation (production only)
