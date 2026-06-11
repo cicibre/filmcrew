@@ -31,12 +31,22 @@ def _save_manifest(manifest, config, job_id, label=""):
 
 
 def _load_manifest(job_id, config):
+    # A job pauses at a gate as `{job_id}_paused_manifest.json` and fails as
+    # `{job_id}_partial_manifest.json`, but only completion writes the bare
+    # `{job_id}_manifest.json`. Resume must find ANY of them — looking only for
+    # the bare name meant a paused job could never be resumed. Load the most
+    # recently written candidate. (Fixed 2026-06-11, claude_b.)
     manifest_dir = config.get("general", {}).get("manifest_dir", "outputs/manifests")
-    manifest_path = os.path.join(manifest_dir, f"{job_id}_manifest.json")
-    if os.path.isfile(manifest_path):
-        with open(manifest_path, "r") as f:
-            return json.load(f)
-    return None
+    candidates = [
+        os.path.join(manifest_dir, f"{job_id}{suffix}_manifest.json")
+        for suffix in ("", "_paused", "_partial")
+    ]
+    existing = [p for p in candidates if os.path.isfile(p)]
+    if not existing:
+        return None
+    latest = max(existing, key=os.path.getmtime)
+    with open(latest, "r") as f:
+        return json.load(f)
 
 
 def _report(manifest, config, job):
@@ -177,6 +187,26 @@ def main():
         print(f"[main] Title: {job.get('title')}")
         print(f"[main] Subject: {job.get('subject')}")
         print()
+
+    # Resume must honour the mode the job was started in — don't silently flip a
+    # paused dry-run/script job into PRODUCTION (real API spend) just because
+    # --continue omits the mode flag. (Fixed 2026-06-11, claude_b.)
+    if args.resume and manifest and not args.dry_run and not args.script_mode:
+        saved_mode = manifest.get("mode")
+        if saved_mode and saved_mode != config["general"]["mode"]:
+            config["general"]["mode"] = saved_mode
+            print(f"[main] Restored saved mode for resume: {saved_mode}\n")
+
+    # Resuming = the human reviewed the gate it paused at and approved it. Record
+    # that so the Producer doesn't re-pause at the same gate. (Added 2026-06-11.)
+    if args.resume and manifest:
+        paused_gate = manifest.get("_paused_at_gate")
+        if paused_gate:
+            approved = manifest.setdefault("_approved_gates", [])
+            if paused_gate not in approved:
+                approved.append(paused_gate)
+            manifest["_paused_at_gate"] = None
+            print(f"[main] Gate approved on resume: {paused_gate}")
 
     # Run pipeline
     producer = Producer(config)

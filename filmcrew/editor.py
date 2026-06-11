@@ -85,16 +85,41 @@ class Editor(BaseCrewMember):
     # ------------------------------------------------------------------
     # Placeholder clip generation (works without media API keys)
     # ------------------------------------------------------------------
+    def _font_arg(self):
+        """Return a `fontfile=<path>:` fragment for drawtext, or "" if none found.
+
+        drawtext has NO default font on macOS, so without an explicit fontfile
+        every clip render fails. Probe common OS font paths. (Added 2026-06-11.)
+        """
+        candidates = [
+            "/System/Library/Fonts/Supplemental/Arial.ttf",          # macOS
+            "/System/Library/Fonts/Helvetica.ttc",                   # macOS
+            "/Library/Fonts/Arial.ttf",                              # macOS (user)
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",       # Debian/Ubuntu
+            "/usr/share/fonts/dejavu/DejaVuSans.ttf",                # Fedora
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        ]
+        for f in candidates:
+            if os.path.isfile(f):
+                return f"fontfile={f}:"
+        return ""  # fall back to ffmpeg/fontconfig default (may work on some Linux)
+
     def _render_placeholder_clips(self, assets, output_dir):
         """Render one .mp4 per frame using ffmpeg color+drawtext."""
         clips = []
+        font = self._font_arg()
         for i, asset in enumerate(assets, 1):
             result = asset.get("result", {})
             # Duration from storyboard or default to 3s
             dur = max(1, int(result.get("duration", 3)))
             prompt = result.get("prompt", f"Frame {i}")
-            # Clean prompt for display
-            display = prompt[:80].replace("'", "").replace("\\", "")
+            # Sanitise for the drawtext filter. Collapse ALL whitespace first —
+            # newlines/tabs in the text break the shell command ("Error opening
+            # output files") — then strip the chars that break filter parsing.
+            display = " ".join(str(prompt).split())[:80]
+            for ch in ("'", "\\", ":", "%"):
+                display = display.replace(ch, " ")
+            display = display.strip() or f"Frame {i}"
             clip_path = os.path.join(output_dir, f"_clip_{i:03d}.mp4")
 
             # background color cycles through ROVA brand palette
@@ -102,42 +127,55 @@ class Editor(BaseCrewMember):
                       "#2c3e50", "#34495e", "#8e44ad", "#2980b9", "#16a085"]
             bg = colors[(i - 1) % len(colors)]
 
-            # Generate colored frame with text overlay (system default font)
-            cmd = (
-                f"ffmpeg -y -f lavfi -i color=c={bg}:s=1920x1080 -t {dur} "
-                f'-vf "drawtext=text=\\\'{display}\\\':fontsize=48:'
-                f'fontcolor=white:x=(w-tw)/2:y=(h-th)/2" '
-                f"-c:v libx264 -preset ultrafast -an -pix_fmt yuv420p "
-                f'-movflags +faststart "{clip_path}" 2>&1'
-            )
-            try:
-                r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-                if r.returncode == 0:
+            # Argument LIST (not shell=True): the old hand-escaped shell string
+            # broke on quotes. A list passes each arg literally. (Fixed 2026-06-11.)
+            base = ["ffmpeg", "-y", "-f", "lavfi",
+                    "-i", f"color=c={bg}:s=1920x1080", "-t", str(dur)]
+            tail = ["-c:v", "libx264", "-preset", "ultrafast", "-an",
+                    "-pix_fmt", "yuv420p", "-movflags", "+faststart", clip_path]
+            vf = (f"drawtext={font}text='{display}':fontsize=48:"
+                  f"fontcolor=white:x=(w-tw)/2:y=(h-th)/2")
+            # Try text-on-color; fall back to plain color if this ffmpeg has no
+            # drawtext (built without libfreetype — common on macOS/Homebrew). A
+            # real .mp4 is produced either way. (Graceful degradation, 2026-06-11.)
+            attempts = [base + ["-vf", vf] + tail, base + tail]
+            r = None
+            for ci, cmd in enumerate(attempts):
+                try:
+                    r = subprocess.run(cmd, capture_output=True, text=True)
+                except Exception as e:
+                    print(f"[Editor] Frame {i} exception: {e}")
+                    break
+                if r.returncode == 0 and os.path.isfile(clip_path):
                     clips.append(clip_path)
-                else:
-                    print(f"[Editor] Frame {i} render failed: {r.stderr[:200]}")
-            except Exception as e:
-                print(f"[Editor] Frame {i} exception: {e}")
+                    if ci == 1:
+                        print(f"[Editor] Frame {i}: no drawtext in ffmpeg — rendered plain color clip.")
+                    break
+            else:
+                err = (r.stderr or r.stdout or "").strip().splitlines() if r else []
+                print(f"[Editor] Frame {i} render failed: {err[-1] if err else '(no output)'}")
         return clips
 
     def _write_concat_list(self, clips, output_dir):
         path = os.path.join(output_dir, "_concat.txt")
         with open(path, "w") as f:
             for clip in clips:
-                f.write(f"file '{clip}'\n")
+                # Absolute path — ffmpeg's concat demuxer resolves relative
+                # entries against the LIST file's dir, not cwd. (Fixed 2026-06-11.)
+                f.write(f"file '{os.path.abspath(clip)}'\n")
         return path
 
     def _run_ffmpeg_concat(self, concat_path, output_path):
-        cmd = (
-            f'ffmpeg -y -f concat -safe 0 -i "{concat_path}" '
-            f"-c:v libx264 -preset fast -crf 23 -pix_fmt yuv420p "
-            f"-movflags +faststart \"{output_path}\" 2>&1"
-        )
+        cmd = [
+            "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", concat_path,
+            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-pix_fmt", "yuv420p", "-movflags", "+faststart", output_path,
+        ]
         try:
-            r = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            r = subprocess.run(cmd, capture_output=True, text=True)
             if r.returncode == 0 and os.path.isfile(output_path):
                 return True, "concat succeeded"
-            return False, r.stderr[:400]
+            return False, (r.stderr or r.stdout or "")[:400]
         except Exception as e:
             return False, str(e)
 

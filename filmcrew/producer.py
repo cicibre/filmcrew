@@ -52,9 +52,21 @@ class Producer(BaseCrewMember):
 
         print(f"[Producer] Starting production: {job_id}")
 
+        # Gates that have already been reviewed + approved (the human re-ran
+        # --continue past them). A gate only pauses if it is NOT yet approved —
+        # otherwise the last gate (final_cut, on the always-re-run editor) would
+        # re-fire forever and the job could never complete. (Added 2026-06-11.)
+        approved_gates = manifest.setdefault("_approved_gates", [])
+
         for phase_key, role_name in self.PHASE_ORDER:
-            # Resume: skip if this phase already has output
-            if phase_key in manifest and phase_key != "editor":
+            # Resume: skip if this phase already has output.
+            # NB: each role writes its output under a *semantic* key (e.g.
+            # director -> "director_plan"), which differs from phase_key. We must
+            # look up that real key — checking `phase_key in manifest` never
+            # matched, so on --continue no phase was skipped and any gated phase
+            # re-ran + re-paused forever. (Fixed 2026-06-11, claude_b.)
+            output_key = self._output_key_for_phase(phase_key)
+            if output_key in manifest and phase_key != "editor":
                 print(f"[Producer] {role_name.capitalize()} already done — skipping.")
                 continue
             # Editor is special: re-run always to reflect latest upstream changes
@@ -70,7 +82,7 @@ class Producer(BaseCrewMember):
                 raise CrewFailure(role_name, job_id, e, manifest) from e
 
             gate_name = self._gate_name_for_phase(phase_key)
-            if gate_name and self._gate(gate_name):
+            if gate_name and self._gate(gate_name) and gate_name not in approved_gates:
                 self._pause_for_review(gate_name, job_id, manifest)
 
         manifest["finished_at"] = datetime.utcnow().isoformat()
@@ -93,10 +105,25 @@ class Producer(BaseCrewMember):
         }
         return mapping.get(phase_key)
 
+    def _output_key_for_phase(self, phase_key):
+        # The manifest key each role writes its output under (differs from
+        # phase_key for most roles). Keep in sync with the role implementations.
+        mapping = {
+            "director": "director_plan",
+            "screenwriter": "screenplay",
+            "storyboard": "storyboard",
+            "cinematographer": "cinematography",
+            "sound_designer": "sound_design",
+            "editor": "edit",
+        }
+        return mapping.get(phase_key, phase_key)
+
     def _gate(self, gate_name):
         return self.gates.get(gate_name, True)
 
     def _pause_for_review(self, gate_name, job_id, manifest):
+        # Record where we paused so resume knows which gate the human approved.
+        manifest["_paused_at_gate"] = gate_name
         print(f"[Producer] GATE: {gate_name} — review required.")
         print("[Producer] To continue, re-run with --continue after reviewing.")
         raise GatePause(gate_name, job_id, manifest)
