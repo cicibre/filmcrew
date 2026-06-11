@@ -36,7 +36,13 @@ class VoiceAPI:
 
     def _real(self, text, voice_id, **kwargs):
         if not self.api_key:
-            raise RuntimeError("ElevenLabs API key not configured. Add voice.api_key to config.yaml.")
+            # Graceful degradation: no key -> skip narration (silent) rather than
+            # failing the whole production. (2026-06-11, claude_b.)
+            import warnings
+            warnings.warn(
+                "ElevenLabs key not configured — voiceover skipped (silent). "
+                "Add voice.api_key for narration.", RuntimeWarning, stacklevel=2)
+            return self._mock(text, voice_id, **kwargs)
 
         voice_id = voice_id if voice_id != "default" else self.default_voice_id
         if not voice_id:

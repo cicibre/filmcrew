@@ -10,6 +10,24 @@ from pathlib import Path
 import requests
 
 
+def _retry_session():
+    """A requests Session that retries transient network/5xx errors. Video gen
+    polls for minutes — a single dropped SSL read shouldn't fail the film.
+    (2026-06-11, claude_b — same resilience as spider's crawler.)"""
+    s = requests.Session()
+    try:
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
+        retry = Retry(total=5, connect=4, read=4, status=4,
+                      status_forcelist=(429, 500, 502, 503, 504),
+                      backoff_factor=1.5,
+                      allowed_methods=frozenset(["GET", "POST"]))
+        s.mount("https://", HTTPAdapter(max_retries=retry))
+    except Exception:
+        pass
+    return s
+
+
 class VideoAPI:
     BASE_URL = "https://api.runwayml.com"
 
@@ -19,6 +37,7 @@ class VideoAPI:
         self.api_key = self.config.get("api_key", "")
         self.provider = self.config.get("provider", "runway")
         self.cost_per_second = self.config.get("cost_per_second_usd", 0.15)
+        self._http = _retry_session()
 
     def generate(self, prompt, duration=5, image_path=None, **kwargs):
         if self.mode != "production":
@@ -97,13 +116,13 @@ class VideoAPI:
             # official and community models (the model-scoped /predictions endpoint
             # only exists for official models, so we always go via /v1/predictions
             # with a resolved hash). (2026-06-11.)
-            mr = requests.get(f"https://api.replicate.com/v1/models/{model}",
-                              headers=headers, timeout=30)
+            mr = self._http.get(f"https://api.replicate.com/v1/models/{model}",
+                                headers=headers, timeout=30)
             mr.raise_for_status()
             version = (mr.json().get("latest_version") or {}).get("id")
             if not version:
                 raise RuntimeError(f"Replicate model {model} has no latest version.")
-        resp = requests.post(
+        resp = self._http.post(
             "https://api.replicate.com/v1/predictions",
             headers=headers,
             json={"version": version, "input": {"prompt": prompt}},
@@ -127,12 +146,19 @@ class VideoAPI:
 
     def _poll_replicate_video(self, pred_id, headers, max_attempts=90, interval=10):
         for _ in range(max_attempts):
-            r = requests.get(
-                f"https://api.replicate.com/v1/predictions/{pred_id}",
-                headers=headers, timeout=30,
-            )
-            r.raise_for_status()
-            data = r.json()
+            try:
+                r = self._http.get(
+                    f"https://api.replicate.com/v1/predictions/{pred_id}",
+                    headers=headers, timeout=30,
+                )
+                r.raise_for_status()
+                data = r.json()
+            except requests.exceptions.RequestException as e:
+                # Transient network/SSL blip mid-poll — wait and try again rather
+                # than failing the whole film. (2026-06-11.)
+                print(f"[Video] poll blip ({type(e).__name__}), retrying...")
+                time.sleep(interval)
+                continue
             status = data.get("status", "").lower()
             if status == "succeeded":
                 out = data.get("output")

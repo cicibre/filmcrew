@@ -130,6 +130,7 @@ def main():
         config["general"]["mode"] = "script_mode"
         print("[main] SCRIPT MODE — real LLM for thinking, mocked media.\n")
     else:
+        config["general"]["mode"] = "production"
         print("[main] PRODUCTION MODE\n")
 
     # Determine job source

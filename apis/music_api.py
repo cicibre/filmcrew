@@ -40,7 +40,13 @@ class MusicAPI:
 
     def _real(self, prompt, duration, **kwargs):
         if not self.api_key:
-            raise RuntimeError("Music API key not configured. Add music.api_key to config.yaml.")
+            # Graceful degradation: no key -> skip score (silent) rather than
+            # failing the whole production. (2026-06-11, claude_b.)
+            import warnings
+            warnings.warn(
+                "Music key not configured — score skipped (silent). "
+                "Add music.api_key for a soundtrack.", RuntimeWarning, stacklevel=2)
+            return self._mock(prompt, duration, **kwargs)
 
         if self.provider == "suno":
             return self._suno(prompt, duration, **kwargs)
